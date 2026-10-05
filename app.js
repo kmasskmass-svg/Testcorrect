@@ -61,31 +61,60 @@ let previewTimer = null;
  *  بعض إصدارات OpenCV.js تُعرّف cv كـ Promise وبعضها تستدعي
  *  onRuntimeInitialized — نتعامل مع الحالتين.
  * ===================================================================== */
-async function onOpenCvReady() {
-  try {
-    if (typeof cv === 'undefined') throw new Error('cv undefined');
-    // تنبيه: لا نستخدم await cv مباشرة؛ فكائن Emscripten يملك دالة then
-    // تُعيد الكائن نفسه، مما يسبب حلقة لا نهائية تجمّد الصفحة.
-    await new Promise((resolve) => {
-      const done = (m) => { window.cv = m; resolve(); }; // resolve بلا قيمة
-      if (cv.Mat) done(cv);
-      else if (typeof cv.then === 'function') cv.then(done);
-      else cv.onRuntimeInitialized = () => done(cv);
-    });
-    cvReady = true;
-    setBadge('OpenCV جاهز', 'ok');
-    btnCapture.disabled = !stream;
-    startLivePreview();
-  } catch (e) {
-    onOpenCvError();
+// نجرّب عدة مصادر بالترتيب؛ إن تعذّر أحدها (حجب، بطء، انقطاع) ننتقل للتالي
+const OPENCV_SOURCES = [
+  'opencv.js', // النسخة المرفوعة مع التطبيق (الأسرع والأضمن على GitHub Pages)
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+  'https://unpkg.com/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+  'https://docs.opencv.org/4.10.0/opencv.js',
+];
+
+function loadScript(src, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    const timer = setTimeout(() => { s.remove(); reject(new Error('timeout')); }, timeoutMs);
+    s.onload = () => { clearTimeout(timer); resolve(); };
+    s.onerror = () => { clearTimeout(timer); s.remove(); reject(new Error('network')); };
+    document.head.appendChild(s);
+  });
+}
+
+// انتظار اكتمال تهيئة WebAssembly
+// تنبيه: لا نستخدم await cv مباشرة؛ فكائن Emscripten يملك دالة then
+// تُعيد الكائن نفسه، مما يسبب حلقة لا نهائية تجمّد الصفحة.
+function waitForRuntime(timeoutMs) {
+  return new Promise((resolve, reject) => {
+    if (typeof window.cv === 'undefined') return reject(new Error('cv undefined'));
+    const timer = setTimeout(() => reject(new Error('init timeout')), timeoutMs);
+    const done = (m) => { clearTimeout(timer); window.cv = m; resolve(); }; // resolve بلا قيمة
+    if (cv.Mat) done(cv);
+    else if (typeof cv.then === 'function') cv.then(done);
+    else cv.onRuntimeInitialized = () => done(cv);
+  });
+}
+
+async function loadOpenCv() {
+  for (let i = 0; i < OPENCV_SOURCES.length; i++) {
+    const src = OPENCV_SOURCES[i];
+    setBadge(`جارٍ تحميل OpenCV… (${i + 1}/${OPENCV_SOURCES.length})`, 'wait');
+    try {
+      await loadScript(src, 60000);
+      await waitForRuntime(60000);
+      cvReady = true;
+      setBadge('OpenCV جاهز', 'ok');
+      showMessage('');
+      btnCapture.disabled = !stream;
+      startLivePreview();
+      return;
+    } catch (e) {
+      console.warn('فشل تحميل OpenCV من', src, e.message);
+      try { delete window.cv; } catch (_) { window.cv = undefined; }
+    }
   }
-}
-function onOpenCvError() {
   setBadge('تعذّر تحميل OpenCV', 'err');
-  showMessage('تعذّر تحميل مكتبة OpenCV.js — تحقق من اتصال الإنترنت.', 'err');
+  showMessage('تعذّر تحميل مكتبة OpenCV.js من كل المصادر — تحقق من الإنترنت ثم أعد تحميل الصفحة.', 'err');
 }
-window.onOpenCvReady = onOpenCvReady;
-window.onOpenCvError = onOpenCvError;
 
 /* =====================================================================
  *  الكاميرا
@@ -614,3 +643,4 @@ examSelect.innerHTML = Object.entries(EXAMS)
   .map(([id, ex]) => `<option value="${id}">${ex.title}</option>`).join('');
 
 startCamera();
+loadOpenCv();
