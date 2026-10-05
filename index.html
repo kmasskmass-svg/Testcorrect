@@ -21,11 +21,48 @@
   </header>
 
   <main class="container">
-    <!-- إعدادات الاختبار -->
-    <section class="card controls">
-      <label for="examSelect">نموذج الإجابة:</label>
-      <select id="examSelect"></select>
-      <a class="link" href="sheet.html" target="_blank">🖨️ طباعة ورقة الإجابة</a>
+    <!-- إعداد الاختبار: الاسم، عدد الأسئلة والخيارات، والإجابات الصحيحة -->
+    <section class="card setup">
+      <div class="setup-head">
+        <h2>⚙️ إعداد الاختبار</h2>
+        <div class="setup-pick">
+          <select id="examSelect" aria-label="الاختبار الحالي"></select>
+          <button id="btnNew" type="button" class="btn btn-ghost btn-sm">＋ جديد</button>
+          <button id="btnDelete" type="button" class="btn btn-ghost btn-sm btn-danger">حذف</button>
+        </div>
+      </div>
+
+      <details id="examEditor" open>
+        <summary class="editor-summary">تعديل الاسم وعدد الأسئلة والإجابات الصحيحة</summary>
+        <div class="fields-grid">
+          <label class="field field-wide">
+            <span>اسم الاختبار</span>
+            <input id="examTitle" type="text" placeholder="مثال: محاسبة التكاليف — الاختبار الأول" />
+          </label>
+          <label class="field">
+            <span>عدد الأسئلة (حتى 30)</span>
+            <input id="examN" type="number" min="1" max="30" inputmode="numeric" />
+          </label>
+          <label class="field">
+            <span>عدد الخيارات</span>
+            <select id="examO">
+              <option value="2">2 (أ، ب)</option>
+              <option value="3">3 (أ – ج)</option>
+              <option value="4">4 (أ – د)</option>
+              <option value="5">5 (أ – هـ)</option>
+            </select>
+          </label>
+        </div>
+
+        <h3 class="key-title">الإجابات الصحيحة <small id="keyProgress"></small></h3>
+        <p class="hint">اضغط الحرف الصحيح لكل سؤال (ضغطة ثانية تلغيه).</p>
+        <div id="keyGrid" class="key-grid"></div>
+
+        <div class="setup-foot">
+          <a id="printLink" class="btn btn-ghost" href="sheet.html" target="_blank">🖨️ طباعة ورقة الإجابة لهذا الاختبار</a>
+          <small id="setupMsg" class="muted"></small>
+        </div>
+      </details>
     </section>
 
     <!-- منطقة الكاميرا -->

@@ -14,9 +14,8 @@
  *    رقم الخيار يبدأ من 0:  0 = أ ، 1 = ب ، 2 = ج ، 3 = د
  * ------------------------------------------------------------------- */
 const CONFIG = {
-  numQuestions: 10,          // عدد الأسئلة في الورقة
-  numOptions: 4,             // عدد الخيارات لكل سؤال
-  optionLabels: ['أ', 'ب', 'ج', 'د'],
+  optionLabels: ['أ', 'ب', 'ج', 'د', 'هـ'],   // عدد الأسئلة والخيارات يُضبط من واجهة «إعداد الاختبار»
+  maxQuestions: 30,
   warpWidth: 600,            // عرض الورقة بعد التسوية (بالبكسل) — يوحّد المقاييس
   detectWidth: 800,          // عرض الصورة المصغّرة المستخدمة لاكتشاف الحواف (للسرعة)
   minPaperAreaRatio: 0.15,   // أقل مساحة للورقة نسبةً لمساحة الصورة
@@ -26,16 +25,16 @@ const CONFIG = {
   livePreviewMs: 350,        // الفاصل الزمني لمعاينة اكتشاف الورقة لحظياً
 };
 
-const EXAMS = {
-  entrepreneurship: {
-    title: 'أساسيات ريادة الأعمال — اختبار قصير',
-    key: [1, 0, 2, 3, 1, 0, 2, 1, 3, 0],
-  },
-  costAccounting: {
-    title: 'محاسبة التكاليف — اختبار قصير',
-    key: [2, 2, 0, 1, 3, 1, 0, 2, 3, 1],
-  },
-};
+// نماذج افتراضية تظهر أول مرة فقط؛ بعدها تُحفظ اختباراتك في المتصفح (localStorage)
+// key: رقم الخيار الصحيح لكل سؤال يبدأ من 0 (0=أ، 1=ب، 2=ج، 3=د، 4=هـ)، و -1 = لم يُحدد
+const DEFAULT_EXAMS = [
+  { id: 'entrepreneurship', title: 'أساسيات ريادة الأعمال — اختبار قصير', n: 10, o: 4,
+    key: [1, 0, 2, 3, 1, 0, 2, 1, 3, 0] },
+  { id: 'costAccounting', title: 'محاسبة التكاليف — اختبار قصير', n: 10, o: 4,
+    key: [2, 2, 0, 1, 3, 1, 0, 2, 3, 1] },
+];
+const STORE_KEY = 'omr.exams.v1';
+const ACTIVE_KEY = 'omr.activeExam.v1';
 
 /* ---------------------------------------------------------------------
  * عناصر الواجهة
@@ -366,20 +365,30 @@ function findBubbles(warped, t) {
 }
 
 /* ---------------------------------------------------------------------
+ *  تخطيط الورقة: عمود واحد حتى 15 سؤالاً، وعمودان حتى 30 سؤالاً.
+ *  (نفس الدالة موجودة في sheet.html — يجب أن تتطابقا)
+ * ------------------------------------------------------------------- */
+function sheetLayout(n) {
+  const cols = n > 15 ? 2 : 1;
+  return { cols, rowsPerCol: Math.ceil(n / cols) };
+}
+
+/* ---------------------------------------------------------------------
  *  خوارزمية الفرز إلى شبكة (أسئلة × خيارات)
  *  ---------------------------------------------------------------------
- *  الخطوة 1 — فرز رأسي: نرتب كل الفقاعات تصاعدياً حسب مركزها الرأسي cy.
- *  الخطوة 2 — تجميع إلى صفوف: نمرّ على القائمة المرتبة؛ إذا كان الفرق بين
- *     cy للفقاعة الحالية ومتوسط cy للصف الحالي أصغر من نصف قطر الفقاعة
- *     تقريباً (0.6 × الارتفاع الوسيط) فهي في نفس الصف، وإلا نبدأ صفاً جديداً.
- *     (هذا أمتن من التقسيم الثابت كل 4 عناصر لأنه يتحمّل الميلان الطفيف.)
+ *  الخطوة 0 — تقسيم إلى أعمدة (عند وجود عمودين): الفقاعة التي يقع مركزها
+ *     cx يمين منتصف الورقة تنتمي للعمود الأول (الأسئلة 1..k) في الورقة العربية.
+ *  الخطوة 1 — فرز رأسي داخل كل عمود: ترتيب تصاعدي حسب مركزها الرأسي cy.
+ *  الخطوة 2 — تجميع إلى صفوف: إذا كان الفرق بين cy للفقاعة الحالية ومتوسط
+ *     cy للصف الحالي أصغر من 0.6 × الارتفاع الوسيط للفقاعة فهي في نفس الصف،
+ *     وإلا نبدأ صفاً جديداً. (أمتن من التقسيم الثابت لأنه يتحمّل الميلان الطفيف.)
  *  الخطوة 3 — نُبقي الصفوف التي تحتوي بالضبط numOptions فقاعة.
  *  الخطوة 4 — فرز أفقي داخل كل صف: حسب cx تنازلياً للورقة العربية
  *     (أ على اليمين) أو تصاعدياً للورقة اللاتينية.
  *  النتيجة: grid[q][o] = الفقاعة الخاصة بالسؤال q والخيار o.
  * ------------------------------------------------------------------- */
-function sortBubblesIntoGrid(bubbles) {
-  const sorted = [...bubbles].sort((a, b) => a.cy - b.cy);
+function groupRows(list, numOptions) {
+  const sorted = [...list].sort((a, b) => a.cy - b.cy);
   const hs = sorted.map((b) => b.h).sort((a, b) => a - b);
   const tol = (hs[Math.floor(hs.length / 2)] || 20) * 0.6;
 
@@ -392,10 +401,32 @@ function sortBubblesIntoGrid(bubbles) {
     }
     rows.push([b]);
   }
-
-  const valid = rows.filter((r) => r.length === CONFIG.numOptions);
+  const valid = rows.filter((r) => r.length === numOptions);
   valid.forEach((r) => r.sort((a, b) => CONFIG.rtlOptions ? b.cx - a.cx : a.cx - b.cx));
-  return { grid: valid, rawRows: rows };
+  return valid;
+}
+
+function sortBubblesIntoGrid(bubbles, exam, pageWidth) {
+  const { cols, rowsPerCol } = sheetLayout(exam.n);
+  const columns = Array.from({ length: cols }, () => []);
+  for (const b of bubbles) {
+    let c = 0;
+    if (cols === 2) {
+      const isRight = b.cx > pageWidth / 2;
+      c = (isRight === CONFIG.rtlOptions) ? 0 : 1;
+    }
+    columns[c].push(b);
+  }
+
+  const grid = [];
+  const problems = [];
+  columns.forEach((list, c) => {
+    const expected = Math.min(rowsPerCol, exam.n - c * rowsPerCol);
+    const rows = groupRows(list, exam.o);
+    if (rows.length !== expected) problems.push(`العمود ${c + 1}: ${rows.length} من ${expected}`);
+    grid.push(...rows.slice(0, expected));
+  });
+  return { grid, problems };
 }
 
 /* =====================================================================
@@ -480,8 +511,10 @@ function drawResults(warped, results) {
 function gradeFromCanvas(canvas) {
   const t = createTracker();
   try {
-    const exam = EXAMS[examSelect.value];
-    if (exam.key.length !== CONFIG.numQuestions) throw new Error('طول نموذج الإجابة لا يطابق عدد الأسئلة.');
+    const exam = getActiveExam();
+    if (!exam) throw new Error('أنشئ اختباراً أولاً من «إعداد الاختبار».');
+    const missing = exam.key.findIndex((k) => k < 0 || k >= exam.o);
+    if (missing >= 0) throw new Error(`حدد الإجابة الصحيحة للسؤال ${missing + 1} في «إعداد الاختبار».`);
 
     const src = t.add(cv.imread(canvas));
 
@@ -495,9 +528,9 @@ function gradeFromCanvas(canvas) {
     const { thresh, contours, bubbles } = findBubbles(warped, t);
     cv.imshow($('dbgThresh'), thresh);
 
-    const { grid } = sortBubblesIntoGrid(bubbles);
-    if (grid.length !== CONFIG.numQuestions) {
-      throw new Error(`تم اكتشاف ${grid.length} صف/سؤال صالح (${bubbles.length} فقاعة) بدلاً من ${CONFIG.numQuestions}. قرّب الكاميرا وحسّن الإضاءة وتجنب الظلال.`);
+    const { grid, problems } = sortBubblesIntoGrid(bubbles, exam, thresh.cols);
+    if (problems.length) {
+      throw new Error(`لم تُكتشف كل الأسئلة (${problems.join('، ')}؛ ${bubbles.length} فقاعة). تأكد أن الورقة مطبوعة لنفس الاختبار (${exam.n} سؤالاً × ${exam.o} خيارات)، وقرّب الكاميرا وحسّن الإضاءة.`);
     }
 
     // (5) التصحيح
@@ -638,9 +671,141 @@ fileInput.addEventListener('change', (e) => {
   fileInput.value = '';
 });
 
-// تعبئة قائمة النماذج
-examSelect.innerHTML = Object.entries(EXAMS)
-  .map(([id, ex]) => `<option value="${id}">${ex.title}</option>`).join('');
+/* =====================================================================
+ *  إعداد الاختبارات: إنشاء / تعديل / حذف، مع حفظ تلقائي في المتصفح
+ * ===================================================================== */
+let exams = [];
+let activeId = null;
+
+function loadExams() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+    exams = Array.isArray(saved) && saved.length ? saved : JSON.parse(JSON.stringify(DEFAULT_EXAMS));
+    activeId = localStorage.getItem(ACTIVE_KEY);
+  } catch (_) {
+    exams = JSON.parse(JSON.stringify(DEFAULT_EXAMS));
+  }
+  if (!exams.some((e) => e.id === activeId)) activeId = exams[0]?.id || null;
+}
+function saveExams() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(exams));
+    localStorage.setItem(ACTIVE_KEY, activeId || '');
+    $('setupMsg').textContent = '✓ حُفظ تلقائياً على هذا الجهاز';
+  } catch (_) {
+    $('setupMsg').textContent = 'تنبيه: تعذّر الحفظ في المتصفح (وضع التصفح الخاص؟) — الإعدادات ستضيع عند إغلاق الصفحة.';
+  }
+}
+function getActiveExam() { return exams.find((e) => e.id === activeId) || null; }
+
+// يضبط طول مصفوفة الإجابات حسب عدد الأسئلة، ويلغي أي إجابة خارج عدد الخيارات
+function normalizeExam(ex) {
+  ex.n = Math.max(1, Math.min(CONFIG.maxQuestions, parseInt(ex.n, 10) || 1));
+  ex.o = Math.max(2, Math.min(CONFIG.optionLabels.length, parseInt(ex.o, 10) || 4));
+  ex.key = Array.from({ length: ex.n }, (_, i) => {
+    const k = ex.key[i];
+    return Number.isInteger(k) && k >= 0 && k < ex.o ? k : -1;
+  });
+}
+
+function renderExamSelect() {
+  examSelect.innerHTML = exams.map((e) =>
+    `<option value="${e.id}" ${e.id === activeId ? 'selected' : ''}>${escapeHtml(e.title || 'بدون اسم')}</option>`).join('');
+}
+
+function renderExamEditor() {
+  const ex = getActiveExam();
+  $('examEditor').classList.toggle('hidden', !ex);
+  if (!ex) return;
+  $('examTitle').value = ex.title;
+  $('examN').value = ex.n;
+  $('examO').value = ex.o;
+  renderKeyGrid();
+  updatePrintLink();
+}
+
+function renderKeyGrid() {
+  const ex = getActiveExam();
+  const L = CONFIG.optionLabels;
+  $('keyGrid').innerHTML = ex.key.map((k, q) => `
+    <div class="key-row ${k < 0 ? 'unset' : ''}">
+      <span class="qn">${q + 1}</span>
+      ${Array.from({ length: ex.o }, (_, o) =>
+        `<button type="button" class="opt ${k === o ? 'sel' : ''}" data-q="${q}" data-o="${o}">${L[o]}</button>`).join('')}
+    </div>`).join('');
+  const done = ex.key.filter((k) => k >= 0).length;
+  $('keyProgress').textContent = `(${done} من ${ex.n})`;
+}
+
+function updatePrintLink() {
+  const ex = getActiveExam();
+  const qs = new URLSearchParams({ title: ex.title, n: ex.n, o: ex.o });
+  $('printLink').href = 'sheet.html?' + qs.toString();
+}
+
+function escapeHtml(t) {
+  return String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+examSelect.addEventListener('change', () => { activeId = examSelect.value; saveExams(); renderExamEditor(); });
+
+$('btnNew').addEventListener('click', () => {
+  const ex = { id: 'ex' + Date.now(), title: 'اختبار جديد', n: 10, o: 4, key: [] };
+  normalizeExam(ex);
+  exams.push(ex); activeId = ex.id;
+  saveExams(); renderExamSelect(); renderExamEditor();
+  $('examEditor').open = true;
+  $('examTitle').focus(); $('examTitle').select();
+});
+
+$('btnDelete').addEventListener('click', () => {
+  const ex = getActiveExam();
+  if (!ex || !confirm(`حذف «${ex.title}»؟`)) return;
+  exams = exams.filter((e) => e.id !== ex.id);
+  activeId = exams[0]?.id || null;
+  saveExams(); renderExamSelect(); renderExamEditor();
+});
+
+$('examTitle').addEventListener('input', (e) => {
+  const ex = getActiveExam(); ex.title = e.target.value;
+  saveExams(); renderExamSelect(); updatePrintLink();
+});
+
+// نحدّث الشبكة أثناء الكتابة (input) حتى تكون جاهزة قبل أن يلمس المستخدم أي إجابة،
+// ونعيد الرسم فقط إذا تغيّر العدد فعلاً (وإلا ضاعت أول لمسة على زر الإجابة)
+function applyQuestionCount(e, final) {
+  const ex = getActiveExam();
+  const v = parseInt(e.target.value, 10);
+  if (!final && !(v >= 1 && v <= CONFIG.maxQuestions)) return;   // كتابة غير مكتملة
+  const before = ex.n;
+  ex.n = e.target.value; normalizeExam(ex);
+  if (final) e.target.value = ex.n;
+  if (ex.n !== before) { saveExams(); renderKeyGrid(); updatePrintLink(); }
+}
+$('examN').addEventListener('input', (e) => applyQuestionCount(e, false));
+$('examN').addEventListener('change', (e) => applyQuestionCount(e, true));
+
+$('examO').addEventListener('change', (e) => {
+  const ex = getActiveExam(); ex.o = e.target.value; normalizeExam(ex);
+  saveExams(); renderKeyGrid(); updatePrintLink();
+});
+
+// اختيار الإجابة الصحيحة بالضغط على الحرف (تفويض الأحداث على الشبكة كلها)
+$('keyGrid').addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if (!btn) return;
+  const ex = getActiveExam();
+  const q = +btn.dataset.q, o = +btn.dataset.o;
+  ex.key[q] = ex.key[q] === o ? -1 : o;   // ضغطة ثانية تلغي الاختيار
+  saveExams(); renderKeyGrid();
+});
+
+loadExams();
+exams.forEach(normalizeExam);
+renderExamSelect();
+renderExamEditor();
+// إذا كان الاختبار الحالي مكتمل الإعداد نطوي المحرر كي تظهر الكاميرا مباشرة
+if (getActiveExam()?.key.every((k) => k >= 0)) $('examEditor').open = false;
 
 startCamera();
 loadOpenCv();

@@ -13,28 +13,31 @@
     * { box-sizing: border-box; }
     body { font-family: "Tajawal", sans-serif; margin: 0; background: #e9edf3; color: #111; }
     .page {
-      width: 210mm; min-height: 297mm; margin: 10mm auto; padding: 14mm 20mm;
+      width: 210mm; min-height: 297mm; margin: 10mm auto; padding: 12mm 20mm;
       background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,.08);
     }
-    h1 { margin: 0 0 2mm; font-size: 20pt; text-align: center; }
-    .course { text-align: center; margin: 0 0 6mm; font-size: 13pt; }
-    .fields { display: grid; grid-template-columns: 2fr 1fr; gap: 6mm; margin-bottom: 8mm; font-size: 12pt; }
+    h1 { margin: 0 0 1mm; font-size: 18pt; text-align: center; }
+    .course { text-align: center; margin: 0 0 5mm; font-size: 12pt; color: #333; }
+    .fields { display: grid; grid-template-columns: 2fr 1fr; gap: 6mm; margin-bottom: 5mm; font-size: 12pt; }
     .fields div { border-bottom: 1px dashed #555; padding-bottom: 2mm; }
-    .note { font-size: 10pt; color: #444; margin: 0 0 6mm; }
+    .note { font-size: 10pt; color: #444; margin: 0 0 5mm; }
 
     /* الإطار الأسود السميك = «أكبر مستطيل» الذي يبحث عنه التطبيق */
     .frame {
       border: 3mm solid #000; width: 170mm; margin: 0 auto;
-      padding: 10mm 16mm 8mm;
+      padding: 8mm 8mm 6mm;
+      display: grid; gap: 8mm;
     }
-    .head, .row { display: flex; align-items: center; justify-content: center; gap: 8mm; }
-    .head { margin-bottom: 4mm; font-size: 10pt; font-weight: 700; }
-    .head span { width: 8mm; text-align: center; }
-    .head .num, .row .num { width: 10mm; }
-    .row { height: 15mm; }
-    .num { font-size: 10pt; font-weight: 700; text-align: center; }
+    .frame.cols-1 { grid-template-columns: 1fr; }
+    .frame.cols-2 { grid-template-columns: 1fr 1fr; }
+    .col { display: flex; flex-direction: column; align-items: center; }
+    .head, .row { display: flex; align-items: center; justify-content: center; gap: var(--gap); }
+    .head { margin-bottom: 3mm; font-size: 10pt; font-weight: 700; }
+    .head span { width: var(--b); text-align: center; }
+    .num { width: 9mm; font-size: 10pt; font-weight: 700; text-align: center; }
+    .row { height: var(--rowh); }
     .bubble {
-      width: 8mm; height: 8mm; border-radius: 50%;
+      width: var(--b); height: var(--b); border-radius: 50%;
       border: 0.6mm solid #000; background: #fff;
     }
     .print-btn {
@@ -50,34 +53,62 @@
 </head>
 <body>
   <div class="page">
-    <h1>ورقة إجابة — اختبار قصير</h1>
-    <p class="course">المقرر: ............................................</p>
+    <h1>ورقة إجابة</h1>
+    <p class="course" id="course">المقرر: ............................................</p>
     <div class="fields">
       <div>اسم المتدرب:</div>
       <div>الرقم التدريبي:</div>
     </div>
     <p class="note">ظلّل الدائرة بالكامل بقلم أسود أو أزرق داكن. لا تكتب أي شيء داخل الإطار الأسود.</p>
 
-    <div class="frame">
-      <div class="head" id="head"></div>
-      <div id="rows"></div>
-    </div>
+    <div class="frame" id="frame"></div>
   </div>
   <br />
   <button class="print-btn" onclick="window.print()">🖨️ طباعة</button>
   <br />
 
   <script>
-    // يجب أن تطابق هذه القيم CONFIG في app.js
-    const NUM_QUESTIONS = 10;
-    const LABELS = ['أ', 'ب', 'ج', 'د'];
+    // الإعدادات تأتي من رابط التطبيق: sheet.html?title=...&n=10&o=4
+    const p = new URLSearchParams(location.search);
+    const N = Math.max(1, Math.min(30, parseInt(p.get('n'), 10) || 10));
+    const O = Math.max(2, Math.min(5, parseInt(p.get('o'), 10) || 4));
+    const TITLE = p.get('title');
+    const LABELS = ['أ', 'ب', 'ج', 'د', 'هـ'].slice(0, O);
+    if (TITLE) {
+      document.getElementById('course').textContent = TITLE;
+      document.title = 'ورقة إجابة — ' + TITLE;
+    }
 
-    // في الاتجاه RTL يظهر العنصر الأول في أقصى اليمين: رقم السؤال ثم أ ب ج د
-    document.getElementById('head').innerHTML =
-      '<span class="num"></span>' + LABELS.map(l => `<span>${l}</span>`).join('');
-    document.getElementById('rows').innerHTML = Array.from({ length: NUM_QUESTIONS }, (_, i) =>
-      `<div class="row"><span class="num">${i + 1}</span>${LABELS.map(() => '<span class="bubble"></span>').join('')}</div>`
-    ).join('');
+    // نفس دالة التخطيط في app.js: عمود واحد حتى 15 سؤالاً، وعمودان حتى 30
+    function sheetLayout(n) {
+      const cols = n > 15 ? 2 : 1;
+      return { cols, rowsPerCol: Math.ceil(n / cols) };
+    }
+    const { cols, rowsPerCol } = sheetLayout(N);
+
+    // مقاسات الفقاعات والمسافات (بالمليمتر) حسب عدد الأعمدة والخيارات
+    const frame = document.getElementById('frame');
+    const b = cols === 2 ? 7 : 8;
+    const gap = cols === 2 ? 4 : (O >= 5 ? 6 : 8);
+    const rowh = Math.min(cols === 2 ? 13 : 15, 190 / rowsPerCol);
+    frame.className = 'frame cols-' + cols;
+    frame.style.setProperty('--b', b + 'mm');
+    frame.style.setProperty('--gap', gap + 'mm');
+    frame.style.setProperty('--rowh', rowh.toFixed(2) + 'mm');
+
+    // في الاتجاه RTL: العمود الأول (الأسئلة 1..k) على اليمين، والخيار «أ» أقصى يمين الصف
+    let html = '';
+    for (let c = 0; c < cols; c++) {
+      const from = c * rowsPerCol, to = Math.min(N, from + rowsPerCol);
+      html += '<div class="col"><div class="head"><span class="num"></span>' +
+        LABELS.map((l) => `<span>${l}</span>`).join('') + '</div>';
+      for (let q = from; q < to; q++) {
+        html += `<div class="row"><span class="num">${q + 1}</span>` +
+          LABELS.map(() => '<span class="bubble"></span>').join('') + '</div>';
+      }
+      html += '</div>';
+    }
+    frame.innerHTML = html;
   </script>
 </body>
 </html>
